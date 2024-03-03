@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "hash": "4ced76ea06281937f4b2389e207bc690cf317b58",
+  "configuration": {
+    "phase": "on",
+    "events": [
+      "sap.s4.beh.businesspartner.v1.BusinessPartner.Created.v1"
+    ]
+  },
+  "codes": [
+    {
+      "type": "FunctionCall",
+      "syntax": "CQL_INSERT(BusinessPartner_liatService.Partner, [BPID], msg.data.BusinessPartner)"
+    }
+  ]
+}
