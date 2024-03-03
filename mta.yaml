@@ -1,0 +1,237 @@
+_schema-version: '3.1'
+ID: BusinessPartner_liat
+version: 1.0.0
+description: A simple CAP project.
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - rm -rf build/dist
+        - mkdir -p build/dist
+        - rm -rf build/ui-deployer
+        - mkdir -p build/ui-deployer
+    - builder: custom
+      commands:
+        - npm install --production
+        - >-
+          bash -c "cds -v | grep 'cds-dk' || npm i --production --no-save
+          @sap/cds-dk @sap/mdk-tools"
+        - bash -c "export PATH=$PATH:$(pwd)/node_modules/.bin"
+        - cds build --production
+  after-all:
+    - builder: custom
+      commands:
+        - npm install
+modules:
+  - name: BusinessPartner_liat-BusinessPartnerliat.PartenerUILiat
+    type: html5
+    path: app/BusinessPartner_liat.PartenerUILiat
+    build-parameters:
+      builder: custom
+      commands:
+        - rm -rf dist-zip dist
+        - >-
+          npx -p @ui5/cli@^3.0.0 ui5 build --dest dist
+          --include-task=generateManifestBundle
+          --include-task=generateCachebusterInfo
+        - mkdir dist-zip
+        - >-
+          bash -c "cd dist && npx bestzip
+          ../dist-zip/BusinessPartnerliatPartenerUILiat.zip *"
+      _artifactName: BusinessPartnerliatPartenerUILiat.zip
+      supported-platforms:
+        []
+      build-result: dist-zip
+  - name: BusinessPartner_liat-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: BusinessPartner_liat-service-uaa
+      - name: BusinessPartner_liat-service-db
+      - name: BusinessPartner_liat-db
+  - name: BusinessPartner_liat-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      memory: 256MB
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: BusinessPartner_liat-service-uaa
+      - name: BusinessPartner_liat-service-db
+      - name: BusinessPartner_liat-service-destination
+      - name: BusinessPartner_liat-service-metadata
+      - name: BusinessPartner_liat-service-connectivity
+      - name: BusinessPartner_liat-service-logs
+      - name: BusinessPartner_liat-messaging
+      - name: BusinessPartner_liat-db
+  - name: BusinessPartner_liat-aux-destinations
+    type: com.sap.application.content
+    parameters:
+      content:
+        subaccount:
+          existing_destinations_policy: update
+          destinations:
+            - Authentication: OAuth2UserTokenExchange
+              Name: BusinessPartner_liat-service-uaa
+              ServiceInstanceName: BusinessPartner_liat-uaa
+              ServiceKeyName: BusinessPartner_liat-uaa-key
+              sap.cloud.service: lcap.BusinessPartner_liat
+            - Authentication: OAuth2UserTokenExchange
+              Name: BusinessPartner_liat-app-srv
+              TokenServiceInstanceName: BusinessPartner_liat-uaa
+              TokenServiceKeyName: BusinessPartner_liat-uaa-key
+              URL: ~{srv-api/srv-url}
+              sap.cloud.service: lcap.BusinessPartner_liat
+            - Name: BusinessPartner_liat-service-html5-apps-repo-host
+              ServiceInstanceName: BusinessPartner_liat-html5-apps-repo-host
+              ServiceKeyName: BusinessPartner_liat-html5-apps-repo-host-key
+              sap.cloud.service: lcap.BusinessPartner_liat
+            - Authentication: OAuth2UserTokenExchange
+              Name: BusinessPartner_liat-BusinessPartner_liatService
+              TokenServiceInstanceName: BusinessPartner_liat-uaa
+              TokenServiceKeyName: BusinessPartner_liat-uaa-key
+              URL: ~{srv-api/srv-url}/service/BusinessPartner_liat
+              sap.cloud.service: lcap.BusinessPartner_liat
+              sap.applicationdevelopment.actions.enabled: false
+              sap.build.usage: CAP
+              sap.processautomation.enabled: false
+              HTML5.DynamicDestination: false
+              WebIDEEnabled: false
+              MobileEnabled: false
+              AppgyverEnabled: false
+    build-parameters:
+      no-source: true
+    requires:
+      - name: BusinessPartner_liat-service-uaa
+        parameters:
+          service-key:
+            name: BusinessPartner_liat-uaa-key
+      - name: srv-api
+      - name: BusinessPartner_liat-service-html5-apps-repo-host
+        parameters:
+          service-key:
+            name: BusinessPartner_liat-html5-apps-repo-host-key
+      - name: BusinessPartner_liat-service-destination
+        parameters:
+          content-target: true
+  - name: BusinessPartner_liat-launchpad
+    type: html5
+    path: build/launchpad
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - >-
+          npx -p @ui5/cli@^3.0.0 ui5 build --dest dist
+          --include-task=generateManifestBundle
+          --include-task=generateCachebusterInfo
+        - bash -c "cd dist && npx bestzip ../../../build/dist/launchpad.zip *"
+        - rm -rf dist
+      _artifactName: launchpad.zip
+      supported-platforms:
+        []
+      build-result: ../../build/dist
+  - name: BusinessPartner_liat-aux-ui-deployer
+    type: com.sap.application.content
+    path: build/ui-deployer
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: BusinessPartner_liat-BusinessPartnerliat.PartenerUILiat
+          artifacts:
+            - BusinessPartnerliatPartenerUILiat.zip
+          target-path: resources
+        - name: BusinessPartner_liat-launchpad
+          artifacts:
+            - launchpad.zip
+          target-path: resources
+    requires:
+      - name: BusinessPartner_liat-service-html5-apps-repo-host
+        parameters:
+          content-target: true
+resources:
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-uaa
+    parameters:
+      service: xsuaa
+      service-plan: application
+      service-name: BusinessPartner_liat-uaa
+      path: xs-security.json
+      config:
+        oauth2-configuration:
+          redirect-uris:
+            - https://*.${default-domain}/login/*
+        xsappname: BusinessPartner_liat-${space}
+        role-collections:
+          []
+        tenant-mode: dedicated
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-db
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: BusinessPartner_liat-db
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-destination
+    parameters:
+      service: destination
+      service-plan: lite
+      service-name: BusinessPartner_liat-destination
+      config:
+        HTML5Runtime_enabled: true
+        version: 1.0.0
+  - type: org.cloudfoundry.user-provided-service
+    name: BusinessPartner_liat-service-metadata
+    parameters:
+      service: metadata
+      service-plan: standard
+      service-name: BusinessPartner_liat-metadata
+      config:
+        default-domain: ${default-domain}
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-connectivity
+    parameters:
+      service: connectivity
+      service-plan: lite
+      service-name: BusinessPartner_liat-connectivity
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-logs
+    parameters:
+      service: application-logs
+      service-plan: lite
+      service-name: BusinessPartner_liat-logs
+  - type: org.cloudfoundry.managed-service
+    name: BusinessPartner_liat-service-html5-apps-repo-host
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+      service-name: BusinessPartner_liat-html5-apps-repo-host
+  - name: BusinessPartner_liat-messaging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: enterprise-messaging
+      service-plan: default
+      path: ./event-mesh.json
+  - name: BusinessPartner_liat-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
